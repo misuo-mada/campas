@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ミステリー絵しりとり</title>
+  <style>
+    body {
+      text-align: center;
+      font-family: 'Segoe UI', sans-serif;
+      background: #111;
+      color: #eee;
+    }
+    canvas {
+      border: 2px solid #444;
+      background: #fff; /* ← 白背景に変更 */
+      cursor: crosshair;
+      box-shadow: 0 0 10px rgba(255, 0, 100, 0.3);
+    }
+    #controls, #thickness, #clearBtnContainer {
+      margin-top: 10px;
+    }
+    label {
+      margin: 0 5px;
+    }
+    button {
+      margin: 0 5px;
+      padding: 6px 12px;
+      background: #333;
+      color: #eee;
+      border: 1px solid #666;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #555;
+    }
+    #drawings img {
+      margin: 5px;
+      width: 80px;
+      border: 1px solid #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>🕵️‍♂️ キャンパス共有</h1>
+  <p></p>
+
+  <canvas id="canvas" width="300" height="300"></canvas>
+
+  <div id="controls">
+    <label><input type="radio" name="color" value="black" checked> 黒</label>
+    <label><input type="radio" name="color" value="red"> 赤</label>
+    <label><input type="radio" name="color" value="blue"> 青</label>
+    <label><input type="radio" name="color" value="white"> 消しゴム</label>
+  </div>
+
+  <div id="thickness">
+    線の太さ：
+    <button onclick="setThickness(1)">細</button>
+    <button onclick="setThickness(3)">中</button>
+    <button onclick="setThickness(6)">太</button>
+  </div>
+
+  <div id="clearBtnContainer">
+    <button id="saveBtn">💾 画像保存</button>
+    <button id="shareBtn">🖼 履歴に追加</button>
+  </div>
+
+  <h3>履歴</h3>
+  <div id="drawings"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+    let currentColor = 'black';
+    let lineWidth = 3;
+    let prevPos = null;
+    const socket = io();
+
+    // 初期に白で背景塗りつぶし
+    function fillWhite() {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    fillWhite();
+
+    canvas.addEventListener('mousedown', (e) => {
+      drawing = true;
+      prevPos = getMousePos(e);
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      drawing = false;
+      prevPos = null;
+    });
+
+    canvas.addEventListener('mouseout', () => {
+      drawing = false;
+      prevPos = null;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!drawing || !prevPos) return;
+      const currPos = getMousePos(e);
+      drawLine(prevPos, currPos, currentColor, lineWidth);
+      socket.emit('draw', {
+        from: prevPos,
+        to: currPos,
+        color: currentColor,
+        width: lineWidth
+      });
+      prevPos = currPos;
+    });
+
+    socket.on('draw', ({ from, to, color, width }) => {
+      drawLine(from, to, color, width);
+    });
+
+    socket.on('clear', () => {
+      clearCanvas();
+    });
+
+    socket.on('history', (dataUrl) => {
+      displayImage(dataUrl);
+    });
+
+    function drawLine(from, to, color, width) {
+      if (!from || !to) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+    }
+
+    function getMousePos(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    }
+
+    function setThickness(val) {
+      lineWidth = val;
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      fillWhite(); // ← クリア後に白く塗る
+    }
+
+document.querySelectorAll('input[name=color]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    currentColor = e.target.value;
+    if (currentColor === 'white') {
+      lineWidth = 10; // ← めちゃくちゃ大きい消しゴム
+    } else {
+      lineWidth = 10; // ← 通常時の太さに戻す（任意）
+    }
+  });
+});
+
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      clearCanvas();
+      socket.emit('clear'); // 他のクライアントにも通知
+    });
+
+    document.getElementById('saveBtn').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = 'drawing.png';
+      a.click();
+    });
+
+    document.getElementById('shareBtn').addEventListener('click', () => {
+      const dataUrl = canvas.toDataURL();
+      socket.emit('saveHistory', dataUrl);
+    });
+
+    function displayImage(dataUrl) {
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      document.getElementById('drawings').appendChild(img);
+    }
+  </script>
+</body>
+</html>
